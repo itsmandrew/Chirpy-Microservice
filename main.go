@@ -66,25 +66,27 @@ func (cfg *apiConfig) metricsHandler(w http.ResponseWriter, r *http.Request) {
 // Handler for my reset endpoint, resets the state of our apiConfig, 'hits' to 0
 func (cfg *apiConfig) resetHandler(w http.ResponseWriter, r *http.Request) {
 
+	type message struct {
+		Msg string `json:"msg"`
+	}
+
 	if cfg.platform != "dev" {
 		w.WriteHeader(http.StatusForbidden)
 		return
 	}
 
 	// Resetting stuff
-	w.WriteHeader(200)
 	cfg.fileserverHits.Store(0)
-
 	err := cfg.databaseQueries.DeleteUsers(r.Context())
 
 	if err != nil {
 		log.Printf("DeleteUsers failed: %v", err)
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		respondWithError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	fmt.Fprint(w, "Metrics and user table reset.")
+	msg := message{Msg: "Metrics and users table were reset"}
+	respondWithJson(w, http.StatusOK, msg)
 
 }
 
