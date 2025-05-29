@@ -97,10 +97,6 @@ func (cfg *apiConfig) createUserHandler(w http.ResponseWriter, r *http.Request) 
 		Email string `json:"email"`
 	}
 
-	type errorResp struct {
-		Error string `json:"error"`
-	}
-
 	type User struct {
 		ID        uuid.UUID `json:"id"`
 		CreatedAt time.Time `json:"created_at"`
@@ -108,7 +104,6 @@ func (cfg *apiConfig) createUserHandler(w http.ResponseWriter, r *http.Request) 
 		Email     string    `json:"email"`
 	}
 
-	w.Header().Set("Content-Type", "application/json")
 	decoder := json.NewDecoder(r.Body)
 	params := parameters{}
 
@@ -119,29 +114,19 @@ func (cfg *apiConfig) createUserHandler(w http.ResponseWriter, r *http.Request) 
 	// Decoding error print out
 	if err != nil {
 		log.Printf("Error decoding")
-		w.WriteHeader(500)
-
-		errBody := errorResp{
-			Error: "Something went wrong",
-		}
-
-		data, _ := json.Marshal(errBody)
-		w.Write(data)
-
+		respondWithError(w, 500, "Something went wrong")
 		return
 	}
 
 	user, err := cfg.databaseQueries.CreateUser(r.Context(), params.Email)
-	log.Printf("Created user: %v\n", user)
 
 	if err != nil {
 		log.Printf("CreateUser failed: %v", err)
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		respondWithError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	w.WriteHeader(http.StatusCreated)
+	log.Printf("Created user: %v\n", user)
 	respUser := User{
 		ID:        user.ID,
 		CreatedAt: user.CreatedAt,
@@ -149,9 +134,7 @@ func (cfg *apiConfig) createUserHandler(w http.ResponseWriter, r *http.Request) 
 		Email:     user.Email,
 	}
 
-	data, _ := json.Marshal(respUser)
-	w.Write(data)
-
+	respondWithJson(w, http.StatusCreated, respUser)
 }
 
 func simpleCensor(input string, badWords map[string]struct{}) string {
