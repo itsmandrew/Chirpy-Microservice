@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -8,11 +9,15 @@ import (
 	"os"
 	"strings"
 	"sync/atomic"
+
+	"github.com/itsmandrew/server-go/internal/database"
+	_ "github.com/lib/pq"
 )
 
 // Adjustable struct that allows for state
 type apiConfig struct {
-	fileserverHits atomic.Int32
+	fileserverHits  atomic.Int32
+	databaseQueries *database.Queries
 }
 
 // Wrapper around my other handlers, increments my struct var per request (goroutine) and then handles wrapped handler (using ServeHTTP)
@@ -135,12 +140,24 @@ func validateChirpHandler(w http.ResponseWriter, r *http.Request) {
 
 func main() {
 
+	dbURL := os.Getenv("DB_URL")
+	db, err := sql.Open("postgres", dbURL)
+
+	if err != nil {
+		fmt.Println("Cannot connect to db")
+		return
+	}
+
+	dbQueries := database.New(db)
+
 	// Gives a blank, thread-safe routing table. Ready to attach paths
 	// to handler functions, and plug directly into an HTTP server
 	// Basically routing, "which code runs for which URL" is handled by ServeMux
 	mux := http.NewServeMux()
 
-	apiCfg := apiConfig{}
+	apiCfg := apiConfig{
+		databaseQueries: dbQueries,
+	}
 
 	// Serving static stuff
 	mux.Handle(
@@ -187,7 +204,7 @@ func main() {
 
 	// print on startup:
 	log.Printf("Starting server on port %s…", "8080")
-	err := server.ListenAndServe()
+	err = server.ListenAndServe()
 
 	if err != nil {
 		os.Exit(0)
