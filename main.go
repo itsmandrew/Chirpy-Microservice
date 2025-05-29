@@ -9,15 +9,37 @@ import (
 	"os"
 	"strings"
 	"sync/atomic"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/itsmandrew/server-go/internal/database"
+	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 )
+
+func respondWithJson(w http.ResponseWriter, code int, payload interface{}) error {
+	response, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.WriteHeader(code)
+	w.Write(response)
+
+	return nil
+}
+
+func respondWithError(w http.ResponseWriter, code int, msg string) error {
+	return respondWithJson(w, code, map[string]string{"error": msg})
+}
 
 // Adjustable struct that allows for state
 type apiConfig struct {
 	fileserverHits  atomic.Int32
 	databaseQueries *database.Queries
+	platform        string
 }
 
 // Wrapper around my other handlers, increments my struct var per request (goroutine) and then handles wrapped handler (using ServeHTTP)
@@ -43,9 +65,91 @@ func (cfg *apiConfig) metricsHandler(w http.ResponseWriter, r *http.Request) {
 
 // Handler for my reset endpoint, resets the state of our apiConfig, 'hits' to 0
 func (cfg *apiConfig) resetHandler(w http.ResponseWriter, r *http.Request) {
+
+	if cfg.platform != "dev" {
+		w.WriteHeader(http.StatusForbidden)
+		return
+	}
+
+	// Resetting stuff
 	w.WriteHeader(200)
 	cfg.fileserverHits.Store(0)
-	fmt.Fprint(w, "Metrics Reset")
+
+	err := cfg.databaseQueries.DeleteUsers(r.Context())
+
+	if err != nil {
+		log.Printf("DeleteUsers failed: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	fmt.Fprint(w, "Metrics and user table reset.")
+
+}
+
+// Handler for creating a user
+func (cfg *apiConfig) createUserHandler(w http.ResponseWriter, r *http.Request) {
+
+	type parameters struct {
+		Email string `json:"email"`
+	}
+
+	type errorResp struct {
+		Error string `json:"error"`
+	}
+
+	type User struct {
+		ID        uuid.UUID `json:"id"`
+		CreatedAt time.Time `json:"created_at"`
+		UpdatedAt time.Time `json:"updated_at"`
+		Email     string    `json:"email"`
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	decoder := json.NewDecoder(r.Body)
+	params := parameters{}
+
+	defer r.Body.Close()
+
+	err := decoder.Decode(&params)
+
+	// Decoding error print out
+	if err != nil {
+		log.Printf("Error decoding")
+		w.WriteHeader(500)
+
+		errBody := errorResp{
+			Error: "Something went wrong",
+		}
+
+		data, _ := json.Marshal(errBody)
+		w.Write(data)
+
+		return
+	}
+
+	user, err := cfg.databaseQueries.CreateUser(r.Context(), params.Email)
+	log.Printf("Created user: %v\n", user)
+
+	if err != nil {
+		log.Printf("CreateUser failed: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
+	respUser := User{
+		ID:        user.ID,
+		CreatedAt: user.CreatedAt,
+		UpdatedAt: user.UpdatedAt,
+		Email:     user.Email,
+	}
+
+	data, _ := json.Marshal(respUser)
+	w.Write(data)
+
 }
 
 func simpleCensor(input string, badWords map[string]struct{}) string {
@@ -74,10 +178,6 @@ func validateChirpHandler(w http.ResponseWriter, r *http.Request) {
 		Body string `json:"body"`
 	}
 
-	type errorResp struct {
-		Error string `json:"error"`
-	}
-
 	type goodResponse struct {
 		CleanBody string `json:"cleaned_body"`
 	}
@@ -88,7 +188,6 @@ func validateChirpHandler(w http.ResponseWriter, r *http.Request) {
 		"fornax":    {},
 	}
 
-	w.Header().Set("Content-Type", "application/json")
 	decoder := json.NewDecoder(r.Body)
 	params := parameters{}
 
@@ -99,15 +198,7 @@ func validateChirpHandler(w http.ResponseWriter, r *http.Request) {
 
 	if err != nil {
 		log.Printf("Error decoding")
-		w.WriteHeader(500)
-
-		errBody := errorResp{
-			Error: "Something went wrong",
-		}
-
-		data, _ := json.Marshal(errBody)
-		w.Write(data)
-
+		respondWithError(w, 500, "Something went wrong")
 		return
 	}
 
@@ -116,31 +207,32 @@ func validateChirpHandler(w http.ResponseWriter, r *http.Request) {
 	log.Printf("Words in payload: %d", len(params.Body))
 	if len(params.Body) > 140 {
 		log.Printf("Chirp is too long")
-		w.WriteHeader(400)
-
-		errBody := errorResp{
-			Error: "Chirp is too long",
-		}
-
-		data, _ := json.Marshal(errBody)
-		w.Write(data)
+		respondWithError(w, 400, "Chirp is too long")
 		return
 	}
 
 	result := simpleCensor(params.Body, bannedWords)
+
 	returnResp := goodResponse{
 		CleanBody: result,
 	}
 
-	data, _ := json.Marshal(returnResp)
-	w.WriteHeader(200)
-	w.Write(data)
+	respondWithJson(w, http.StatusOK, returnResp)
+}
 
+func init() {
+	// loads .env into the process’s env vars; logs but does not exit if .env is missing
+	if err := godotenv.Load(); err != nil {
+		log.Println("⚠️  no .env file found, relying on actual environment variables")
+	}
 }
 
 func main() {
 
+	// Getenv gets the EXPORTED variables, doesn't export
 	dbURL := os.Getenv("DB_URL")
+	platform := os.Getenv("PLATFORM")
+
 	db, err := sql.Open("postgres", dbURL)
 
 	if err != nil {
@@ -157,6 +249,7 @@ func main() {
 
 	apiCfg := apiConfig{
 		databaseQueries: dbQueries,
+		platform:        platform,
 	}
 
 	// Serving static stuff
@@ -194,6 +287,12 @@ func main() {
 	mux.HandleFunc(
 		"POST /admin/reset",
 		apiCfg.resetHandler,
+	)
+
+	// Create users
+	mux.HandleFunc(
+		"POST /api/users",
+		apiCfg.createUserHandler,
 	)
 
 	// Server settings for our http server
