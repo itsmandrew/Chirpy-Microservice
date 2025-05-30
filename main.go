@@ -9,9 +9,7 @@ import (
 	"os"
 	"strings"
 	"sync/atomic"
-	"time"
 
-	"github.com/google/uuid"
 	"github.com/itsmandrew/server-go/internal/database"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
@@ -97,13 +95,6 @@ func (cfg *apiConfig) createUserHandler(w http.ResponseWriter, r *http.Request) 
 		Email string `json:"email"`
 	}
 
-	type User struct {
-		ID        uuid.UUID `json:"id"`
-		CreatedAt time.Time `json:"created_at"`
-		UpdatedAt time.Time `json:"updated_at"`
-		Email     string    `json:"email"`
-	}
-
 	decoder := json.NewDecoder(r.Body)
 	params := parameters{}
 
@@ -127,14 +118,7 @@ func (cfg *apiConfig) createUserHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	log.Printf("Created user: %v\n", user)
-	respUser := User{
-		ID:        user.ID,
-		CreatedAt: user.CreatedAt,
-		UpdatedAt: user.UpdatedAt,
-		Email:     user.Email,
-	}
-
-	respondWithJson(w, http.StatusCreated, respUser)
+	respondWithJson(w, http.StatusCreated, user)
 }
 
 func (cfg *apiConfig) createChirpHandler(w http.ResponseWriter, r *http.Request) {
