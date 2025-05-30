@@ -141,14 +141,6 @@ func (cfg *apiConfig) createChirpHandler(w http.ResponseWriter, r *http.Request)
 
 	var parameters database.CreateChirpParams
 
-	type ChirpResp struct {
-		ID        uuid.UUID `json:"id"`
-		CreatedAt time.Time `json:"created_at"`
-		UpdatedAt time.Time `json:"updated_at"`
-		Body      string    `json:"body"`
-		UserID    uuid.UUID `json:"user_id"`
-	}
-
 	decoder := json.NewDecoder(r.Body)
 	defer r.Body.Close()
 
@@ -179,15 +171,8 @@ func (cfg *apiConfig) createChirpHandler(w http.ResponseWriter, r *http.Request)
 	}
 
 	log.Printf("Created chirp: %v\n", chirp)
-	chirpResp := ChirpResp{
-		ID:        chirp.ID,
-		CreatedAt: chirp.CreatedAt,
-		UpdatedAt: chirp.UpdatedAt,
-		Body:      chirp.Body,
-		UserID:    chirp.UserID,
-	}
+	respondWithJson(w, http.StatusCreated, chirp)
 
-	respondWithJson(w, http.StatusCreated, chirpResp)
 }
 
 func simpleCensor(input string, badWords map[string]struct{}) string {
