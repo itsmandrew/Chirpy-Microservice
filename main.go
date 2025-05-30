@@ -87,7 +87,7 @@ func (cfg *apiConfig) resetHandler(w http.ResponseWriter, r *http.Request) {
 
 	msg := message{Msg: "Metrics and users table were reset"}
 	respondWithJson(w, http.StatusOK, msg)
-
+	log.Println("Metrics and table reset")
 }
 
 // Handler for creating a user
@@ -137,6 +137,59 @@ func (cfg *apiConfig) createUserHandler(w http.ResponseWriter, r *http.Request) 
 	respondWithJson(w, http.StatusCreated, respUser)
 }
 
+func (cfg *apiConfig) createChirpHandler(w http.ResponseWriter, r *http.Request) {
+
+	var parameters database.CreateChirpParams
+
+	type ChirpResp struct {
+		ID        uuid.UUID `json:"id"`
+		CreatedAt time.Time `json:"created_at"`
+		UpdatedAt time.Time `json:"updated_at"`
+		Body      string    `json:"body"`
+		UserID    uuid.UUID `json:"user_id"`
+	}
+
+	decoder := json.NewDecoder(r.Body)
+	defer r.Body.Close()
+
+	err := decoder.Decode(&parameters)
+
+	if err != nil {
+		log.Printf("Error decoding")
+		respondWithError(w, 500, "Something went wrong")
+		return
+	}
+
+	ok, cleanBody := validateChirp(parameters.Body)
+
+	if !ok {
+		log.Printf("Chirp is too long")
+		respondWithError(w, 400, "Chirp is too long")
+		return
+	}
+
+	parameters.Body = cleanBody
+
+	chirp, err := cfg.databaseQueries.CreateChirp(r.Context(), parameters)
+
+	if err != nil {
+		log.Printf("CreateChirp failed: %v", err)
+		respondWithError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	log.Printf("Created chirp: %v\n", chirp)
+	chirpResp := ChirpResp{
+		ID:        chirp.ID,
+		CreatedAt: chirp.CreatedAt,
+		UpdatedAt: chirp.UpdatedAt,
+		Body:      chirp.Body,
+		UserID:    chirp.UserID,
+	}
+
+	respondWithJson(w, http.StatusCreated, chirpResp)
+}
+
 func simpleCensor(input string, badWords map[string]struct{}) string {
 	// Cleaning up the body now...
 	words := strings.Fields(input)
@@ -157,15 +210,7 @@ func simpleCensor(input string, badWords map[string]struct{}) string {
 	return result
 }
 
-func validateChirpHandler(w http.ResponseWriter, r *http.Request) {
-
-	type parameters struct {
-		Body string `json:"body"`
-	}
-
-	type goodResponse struct {
-		CleanBody string `json:"cleaned_body"`
-	}
+func validateChirp(body string) (bool, string) {
 
 	bannedWords := map[string]struct{}{
 		"kerfuffle": {},
@@ -173,36 +218,13 @@ func validateChirpHandler(w http.ResponseWriter, r *http.Request) {
 		"fornax":    {},
 	}
 
-	decoder := json.NewDecoder(r.Body)
-	params := parameters{}
-
-	defer r.Body.Close()
-
-	// Checking valid parameters ---------
-	err := decoder.Decode(&params)
-
-	if err != nil {
-		log.Printf("Error decoding")
-		respondWithError(w, 500, "Something went wrong")
-		return
-	}
-
-	// ------------------------------------
-
-	log.Printf("Words in payload: %d", len(params.Body))
-	if len(params.Body) > 140 {
+	if len(body) > 140 {
 		log.Printf("Chirp is too long")
-		respondWithError(w, 400, "Chirp is too long")
-		return
+		return false, ""
 	}
 
-	result := simpleCensor(params.Body, bannedWords)
-
-	returnResp := goodResponse{
-		CleanBody: result,
-	}
-
-	respondWithJson(w, http.StatusOK, returnResp)
+	result := simpleCensor(body, bannedWords)
+	return true, result
 }
 
 func init() {
@@ -260,8 +282,6 @@ func main() {
 		w.Write([]byte("OK"))
 	})
 
-	mux.HandleFunc("POST /api/validate_chirp", validateChirpHandler)
-
 	// Check increments endpoint
 	mux.HandleFunc(
 		"GET /admin/metrics",
@@ -278,6 +298,12 @@ func main() {
 	mux.HandleFunc(
 		"POST /api/users",
 		apiCfg.createUserHandler,
+	)
+
+	// cCeate chirps
+	mux.HandleFunc(
+		"POST /api/chirps",
+		apiCfg.createChirpHandler,
 	)
 
 	// Server settings for our http server
