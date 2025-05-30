@@ -10,3 +10,9 @@ RETURNING *;
 SELECT *
 FROM chirps
 ORDER BY created_at ASC;
+
+
+-- name: GetIndividualChirp :one
+SELECT *
+FROM chirps
+WHERE id = $1;

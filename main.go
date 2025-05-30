@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync/atomic"
 
+	"github.com/google/uuid"
 	"github.com/itsmandrew/server-go/internal/database"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
@@ -173,6 +174,45 @@ func (cfg *apiConfig) getChirpsHandler(w http.ResponseWriter, r *http.Request) {
 	respondWithJson(w, http.StatusOK, chirps)
 }
 
+func (cfg *apiConfig) getIndividualChirp(w http.ResponseWriter, r *http.Request) {
+
+	userID := r.PathValue("chirpID")
+	log.Println(userID)
+
+	if userID == "" {
+		log.Println("Bad request, no id provided")
+		respondWithError(w, http.StatusBadRequest, "No ID provided")
+		return
+	}
+
+	parsedID, err := uuid.Parse(userID)
+
+	if err != nil {
+		log.Println(err.Error())
+		respondWithError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	chirp, err := cfg.databaseQueries.GetIndividualChirp(r.Context(), parsedID)
+
+	if err != nil {
+		log.Println("Something went wrong with the query")
+		respondWithError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	var nullVal database.Chirp
+
+	if chirp == nullVal {
+		log.Println("No chirps founds")
+		respondWithError(w, http.StatusNotFound, "No chirps found")
+		return
+	}
+
+	respondWithJson(w, http.StatusOK, chirp)
+
+}
+
 func simpleCensor(input string, badWords map[string]struct{}) string {
 	// Cleaning up the body now...
 	words := strings.Fields(input)
@@ -292,6 +332,11 @@ func main() {
 	mux.HandleFunc(
 		"GET /api/chirps",
 		apiCfg.getChirpsHandler,
+	)
+
+	mux.HandleFunc(
+		"GET /api/chirps/{chirpID}",
+		apiCfg.getIndividualChirp,
 	)
 
 	// Server settings for our http server
