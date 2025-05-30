@@ -159,6 +159,20 @@ func (cfg *apiConfig) createChirpHandler(w http.ResponseWriter, r *http.Request)
 
 }
 
+func (cfg *apiConfig) getChirpsHandler(w http.ResponseWriter, r *http.Request) {
+
+	chirps, err := cfg.databaseQueries.GetChirps(r.Context())
+
+	if err != nil {
+		log.Println("Something went wrong with the query")
+		respondWithError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	log.Printf("Retrieving chirps: %v\n", chirps)
+	respondWithJson(w, http.StatusOK, chirps)
+}
+
 func simpleCensor(input string, badWords map[string]struct{}) string {
 	// Cleaning up the body now...
 	words := strings.Fields(input)
@@ -269,10 +283,15 @@ func main() {
 		apiCfg.createUserHandler,
 	)
 
-	// cCeate chirps
+	// Create chirps
 	mux.HandleFunc(
 		"POST /api/chirps",
 		apiCfg.createChirpHandler,
+	)
+
+	mux.HandleFunc(
+		"GET /api/chirps",
+		apiCfg.getChirpsHandler,
 	)
 
 	// Server settings for our http server
