@@ -3,6 +3,9 @@ package auth
 import (
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/google/uuid"
 )
 
 func TestHashedPasswordAndCheck(t *testing.T) {
@@ -33,5 +36,32 @@ func TestHashedPasswordTooLong(t *testing.T) {
 	_, err := HashedPassword(longPassword)
 	if err == nil {
 		t.Error("expected HashedPassword to return an error for a password longer than 72 bytes, got nil")
+	}
+}
+
+func TestMakeAndValidateJWT(t *testing.T) {
+
+	userID := uuid.New()
+	secret := "my-super-secret"
+	expiresIn := 5 * time.Minute
+
+	// Make JWT and assert no error and non-empty token strings
+	tokenString, err := MakeJWT(userID, secret, expiresIn)
+
+	if err != nil {
+		t.Fatalf("MakeJWT returned an unexpected error: %v", err)
+	}
+
+	if tokenString == "" {
+		t.Fatalf("MakeJWT returned an empty token string")
+	}
+
+	parsedID, err := ValidateJWT(tokenString, secret)
+	if err != nil {
+		t.Fatalf("ValidateJWT returned an unexpected error: %v", err)
+	}
+
+	if parsedID != userID {
+		t.Errorf("ValidateJWT returned %q; expected %q", parsedID, userID)
 	}
 }

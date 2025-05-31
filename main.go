@@ -252,7 +252,7 @@ func (cfg *apiConfig) loginUserHandler(w http.ResponseWriter, r *http.Request) {
 	user, err := cfg.databaseQueries.GetUserByEmail(r.Context(), params.Email)
 	if err != nil {
 		log.Println("Something went wrong with the query")
-		respondWithError(w, http.StatusInternalServerError, err.Error())
+		respondWithError(w, http.StatusInternalServerError, "Email does not exist")
 		return
 	}
 
@@ -260,7 +260,7 @@ func (cfg *apiConfig) loginUserHandler(w http.ResponseWriter, r *http.Request) {
 
 	if err != nil {
 		log.Println(err.Error())
-		respondWithError(w, http.StatusUnauthorized, err.Error())
+		respondWithError(w, http.StatusUnauthorized, "Email or password is incorrect")
 		return
 	}
 
