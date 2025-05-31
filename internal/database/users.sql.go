@@ -14,7 +14,7 @@ INSERT INTO users (id, created_at, updated_at, email)
 VALUES (
     gen_random_uuid(), NOW(), NOW(), $1
 )
-RETURNING id, created_at, updated_at, email
+RETURNING id, created_at, updated_at, email, hashed_password
 `
 
 func (q *Queries) CreateUser(ctx context.Context, email string) (User, error) {
@@ -25,6 +25,7 @@ func (q *Queries) CreateUser(ctx context.Context, email string) (User, error) {
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Email,
+		&i.HashedPassword,
 	)
 	return i, err
 }
