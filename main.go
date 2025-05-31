@@ -93,20 +93,17 @@ func (cfg *apiConfig) resetHandler(w http.ResponseWriter, r *http.Request) {
 // Handler for creating a user
 func (cfg *apiConfig) createUserHandler(w http.ResponseWriter, r *http.Request) {
 
+	type parameters struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+
 	decoder := json.NewDecoder(r.Body)
-	params := database.CreateUserParams{}
+	params := parameters{}
 
 	defer r.Body.Close()
 
 	err := decoder.Decode(&params)
-
-	if err != nil {
-		log.Printf("Error with encrypting the password")
-		respondWithError(w, http.StatusInternalServerError, err.Error())
-	}
-
-	encryptedPass, err := auth.HashedPassword(params.HashedPassword)
-	params.HashedPassword = encryptedPass
 
 	// Decoding error print out
 	if err != nil {
@@ -115,7 +112,20 @@ func (cfg *apiConfig) createUserHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	user, err := cfg.databaseQueries.CreateUser(r.Context(), params)
+	encryptedPass, err := auth.HashedPassword(params.Password)
+
+	passByParam := database.CreateUserParams{
+		Email:          params.Email,
+		HashedPassword: encryptedPass,
+	}
+
+	// Decoding error print out
+	if err != nil {
+		log.Printf("Error with encrypting the password")
+		respondWithError(w, http.StatusInternalServerError, err.Error())
+	}
+
+	user, err := cfg.databaseQueries.CreateUser(r.Context(), passByParam)
 
 	if err != nil {
 		log.Printf("CreateUser failed: %v", err)
@@ -179,7 +189,7 @@ func (cfg *apiConfig) getChirpsHandler(w http.ResponseWriter, r *http.Request) {
 	respondWithJson(w, http.StatusOK, chirps)
 }
 
-func (cfg *apiConfig) getIndividualChirp(w http.ResponseWriter, r *http.Request) {
+func (cfg *apiConfig) getIndividualChirpHandler(w http.ResponseWriter, r *http.Request) {
 
 	userID := r.PathValue("chirpID")
 	log.Println(userID)
@@ -216,6 +226,52 @@ func (cfg *apiConfig) getIndividualChirp(w http.ResponseWriter, r *http.Request)
 
 	respondWithJson(w, http.StatusOK, chirp)
 
+}
+
+func (cfg *apiConfig) loginUserHandler(w http.ResponseWriter, r *http.Request) {
+
+	type parameters struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+
+	decoder := json.NewDecoder(r.Body)
+	params := parameters{}
+	defer r.Body.Close()
+
+	err := decoder.Decode(&params)
+
+	log.Println(params)
+
+	if err != nil {
+		log.Printf("Error decoding")
+		respondWithError(w, http.StatusInternalServerError, "Something went wrong")
+		return
+	}
+
+	user, err := cfg.databaseQueries.GetUserByEmail(r.Context(), params.Email)
+	if err != nil {
+		log.Println("Something went wrong with the query")
+		respondWithError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	err = auth.CheckPasswordHash(user.HashedPassword, params.Password)
+
+	if err != nil {
+		log.Println(err.Error())
+		respondWithError(w, http.StatusUnauthorized, err.Error())
+		return
+	}
+
+	safeResponse := database.CreateUserRow{
+		ID:        user.ID,
+		CreatedAt: user.CreatedAt,
+		UpdatedAt: user.UpdatedAt,
+		Email:     user.Email,
+	}
+
+	respondWithJson(w, http.StatusOK, safeResponse)
 }
 
 func simpleCensor(input string, badWords map[string]struct{}) string {
@@ -341,7 +397,12 @@ func main() {
 
 	mux.HandleFunc(
 		"GET /api/chirps/{chirpID}",
-		apiCfg.getIndividualChirp,
+		apiCfg.getIndividualChirpHandler,
+	)
+
+	mux.HandleFunc(
+		"POST /api/login",
+		apiCfg.loginUserHandler,
 	)
 
 	// Server settings for our http server
