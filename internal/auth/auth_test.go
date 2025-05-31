@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -63,5 +64,33 @@ func TestMakeAndValidateJWT(t *testing.T) {
 
 	if parsedID != userID {
 		t.Errorf("ValidateJWT returned %q; expected %q", parsedID, userID)
+	}
+}
+
+func TestGetBearerTokenSuccess(t *testing.T) {
+
+	header := http.Header{}
+	header.Set("Authorization", "Bearer token123")
+
+	expected := "token123"
+
+	token, err := GetBearerToken(header)
+
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if token != expected {
+		t.Errorf("expected to get %v, got %v", expected, token)
+	}
+}
+
+func TestGetBearerTokenFail(t *testing.T) {
+	header := http.Header{}
+
+	token, err := GetBearerToken(header)
+
+	if err == nil {
+		t.Fatalf("expected error for missing Authorization header, got token %q", token)
 	}
 }
