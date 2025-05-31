@@ -40,6 +40,7 @@ type apiConfig struct {
 	fileserverHits  atomic.Int32
 	databaseQueries *database.Queries
 	platform        string
+	jwtSecret       string
 }
 
 // Wrapper around my other handlers, increments my struct var per request (goroutine) and then handles wrapped handler (using ServeHTTP)
@@ -323,6 +324,7 @@ func main() {
 	// Getenv gets the EXPORTED variables, doesn't export
 	dbURL := os.Getenv("DB_URL")
 	platform := os.Getenv("PLATFORM")
+	jwtSecret := os.Getenv("JWT_SECRET")
 
 	db, err := sql.Open("postgres", dbURL)
 
@@ -341,6 +343,7 @@ func main() {
 	apiCfg := apiConfig{
 		databaseQueries: dbQueries,
 		platform:        platform,
+		jwtSecret:       jwtSecret,
 	}
 
 	// Serving static stuff
