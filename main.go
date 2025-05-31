@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 
 	"github.com/google/uuid"
+	"github.com/itsmandrew/server-go/internal/auth"
 	"github.com/itsmandrew/server-go/internal/database"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
@@ -92,25 +93,29 @@ func (cfg *apiConfig) resetHandler(w http.ResponseWriter, r *http.Request) {
 // Handler for creating a user
 func (cfg *apiConfig) createUserHandler(w http.ResponseWriter, r *http.Request) {
 
-	type parameters struct {
-		Email string `json:"email"`
-	}
-
 	decoder := json.NewDecoder(r.Body)
-	params := parameters{}
+	params := database.CreateUserParams{}
 
 	defer r.Body.Close()
 
 	err := decoder.Decode(&params)
 
+	if err != nil {
+		log.Printf("Error with encrypting the password")
+		respondWithError(w, http.StatusInternalServerError, err.Error())
+	}
+
+	encryptedPass, err := auth.HashedPassword(params.HashedPassword)
+	params.HashedPassword = encryptedPass
+
 	// Decoding error print out
 	if err != nil {
 		log.Printf("Error decoding")
-		respondWithError(w, 500, "Something went wrong")
+		respondWithError(w, http.StatusInternalServerError, "Something went wrong")
 		return
 	}
 
-	user, err := cfg.databaseQueries.CreateUser(r.Context(), params.Email)
+	user, err := cfg.databaseQueries.CreateUser(r.Context(), params)
 
 	if err != nil {
 		log.Printf("CreateUser failed: %v", err)
