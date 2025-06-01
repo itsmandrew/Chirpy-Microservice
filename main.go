@@ -297,11 +297,11 @@ func (cfg *apiConfig) loginUserHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	jwtToken, err := auth.MakeJWT(user.ID, cfg.jwtSecret, time.Duration(params.ExpiresInSeconds) * time.Second)
+	jwtToken, err := auth.MakeJWT(user.ID, cfg.jwtSecret, time.Duration(params.ExpiresInSeconds)*time.Second)
 
 	if err != nil {
 		log.Println("Something went wrong with creating JWT token")
-		respondWithError(w, http.StatusInternalServerError, err.Error())s
+		respondWithError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
