@@ -7,6 +7,9 @@ import (
 	"strings"
 	"time"
 
+	"crypto/rand"
+	"encoding/hex"
+
 	"github.com/golang-jwt/jwt/v4"
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
@@ -93,4 +96,13 @@ func GetBearerToken(headers http.Header) (string, error) {
 	}
 
 	return strings.TrimPrefix(token, "Bearer "), nil
+}
+
+func MakeRefreshToken() (string, error) {
+
+	key := make([]byte, 32)
+	rand.Read(key)
+
+	encodedStr := hex.EncodeToString(key)
+	return encodedStr, nil
 }
