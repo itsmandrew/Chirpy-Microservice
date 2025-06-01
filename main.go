@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/itsmandrew/server-go/internal/auth"
@@ -153,6 +154,24 @@ func (cfg *apiConfig) createChirpHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	token, err := auth.GetBearerToken(r.Header)
+
+	if err != nil {
+		log.Println("No Bearer token")
+		respondWithError(w, http.StatusUnauthorized, err.Error())
+		return
+	}
+
+	userID, err := auth.ValidateJWT(token, cfg.jwtSecret)
+
+	if err != nil {
+		log.Println("JWT token is invalid")
+		respondWithError(w, http.StatusUnauthorized, err.Error())
+		return
+	}
+
+	parameters.UserID = userID
+
 	ok, cleanBody := validateChirp(parameters.Body)
 
 	if !ok {
@@ -232,8 +251,17 @@ func (cfg *apiConfig) getIndividualChirpHandler(w http.ResponseWriter, r *http.R
 func (cfg *apiConfig) loginUserHandler(w http.ResponseWriter, r *http.Request) {
 
 	type parameters struct {
-		Email    string `json:"email"`
-		Password string `json:"password"`
+		Email            string `json:"email"`
+		Password         string `json:"password"`
+		ExpiresInSeconds int    `json:"expires_in_seconds"`
+	}
+
+	type validResponse struct {
+		ID        uuid.UUID `json:"id"`
+		Email     string    `json:"email"`
+		CreatedAt time.Time `json:"created_at"`
+		UpdatedAt time.Time `json:"updated_at"`
+		Token     string    `json:"token"`
 	}
 
 	decoder := json.NewDecoder(r.Body)
@@ -241,6 +269,10 @@ func (cfg *apiConfig) loginUserHandler(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 
 	err := decoder.Decode(&params)
+
+	if params.ExpiresInSeconds == 0 {
+		params.ExpiresInSeconds = 3600
+	}
 
 	log.Println(params)
 
@@ -265,11 +297,20 @@ func (cfg *apiConfig) loginUserHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	safeResponse := database.CreateUserRow{
+	jwtToken, err := auth.MakeJWT(user.ID, cfg.jwtSecret, time.Duration(params.ExpiresInSeconds) * time.Second)
+
+	if err != nil {
+		log.Println("Something went wrong with creating JWT token")
+		respondWithError(w, http.StatusInternalServerError, err.Error())s
+		return
+	}
+
+	safeResponse := validResponse{
 		ID:        user.ID,
+		Email:     user.Email,
 		CreatedAt: user.CreatedAt,
 		UpdatedAt: user.UpdatedAt,
-		Email:     user.Email,
+		Token:     jwtToken,
 	}
 
 	respondWithJson(w, http.StatusOK, safeResponse)
