@@ -143,17 +143,7 @@ func (cfg *apiConfig) createChirpHandler(w http.ResponseWriter, r *http.Request)
 
 	var parameters database.CreateChirpParams
 
-	decoder := json.NewDecoder(r.Body)
-	defer r.Body.Close()
-
-	err := decoder.Decode(&parameters)
-
-	if err != nil {
-		log.Printf("Error decoding")
-		respondWithError(w, 500, "Something went wrong")
-		return
-	}
-
+	// 1.  Reads the Header for a Bearer Token
 	token, err := auth.GetBearerToken(r.Header)
 
 	if err != nil {
@@ -162,11 +152,39 @@ func (cfg *apiConfig) createChirpHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// Checks to see if the token is a AccessToken vs RefreshToken (accessToken has 3 dots) -> Sanity Check
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		log.Printf("Token does not have three segments (likely not a JWT): %q\n", token)
+		respondWithError(w, http.StatusUnauthorized, "Invalid token format")
+		return
+	}
+
+	// 2. Decode the params into our struct
+	decoder := json.NewDecoder(r.Body)
+	defer r.Body.Close()
+	err = decoder.Decode(&parameters)
+
+	// Handling decoding error
+	if err != nil {
+		log.Printf("Error decoding")
+		respondWithError(w, 500, "Something went wrong")
+		return
+	}
+
+	// 3. Validate our Access Token
 	userID, err := auth.ValidateJWT(token, cfg.jwtSecret)
 
 	if err != nil {
 		log.Println("JWT token is invalid")
 		respondWithError(w, http.StatusUnauthorized, err.Error())
+		return
+	}
+
+	var nullID uuid.UUID
+	if userID == nullID {
+		log.Println("Something wrong, no id value")
+		respondWithError(w, http.StatusUnauthorized, "ID is null")
 		return
 	}
 
@@ -367,6 +385,13 @@ func (cfg *apiConfig) refreshHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var nullValue sql.NullTime
+	if dbToken.RevokedAt != nullValue {
+		log.Println("Refresh token expired")
+		respondWithError(w, http.StatusUnauthorized, "Fuck ur refresh token")
+		return
+	}
+
 	// Handling value not found in database (null return)
 	var nullToken database.RefreshToken
 	if dbToken == nullToken {
@@ -393,6 +418,29 @@ func (cfg *apiConfig) refreshHandler(w http.ResponseWriter, r *http.Request) {
 	// Writing response
 	respondWithJson(w, http.StatusOK, resp)
 
+}
+
+func (cfg *apiConfig) revokeUpdateHandler(w http.ResponseWriter, r *http.Request) {
+
+	refreshToken, err := auth.GetBearerToken(r.Header)
+
+	// Handling error for missing Authorization token
+	if err != nil {
+		log.Println("No bearer token")
+		respondWithError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	err = cfg.databaseQueries.RevokeRefreshToken(r.Context(), refreshToken)
+
+	if err != nil {
+		fmt.Println("Error in the update query for RevokeRefreshToken")
+		respondWithError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+	w.Header().Set("Access-Control-Allow-Origin", "*")
 }
 
 func simpleCensor(input string, badWords map[string]struct{}) string {
@@ -531,6 +579,11 @@ func main() {
 	mux.HandleFunc(
 		"POST /api/refresh",
 		apiCfg.refreshHandler,
+	)
+
+	mux.HandleFunc(
+		"POST /api/revoke",
+		apiCfg.revokeUpdateHandler,
 	)
 
 	// Server settings for our http server
