@@ -341,6 +341,60 @@ func (cfg *apiConfig) loginUserHandler(w http.ResponseWriter, r *http.Request) {
 	respondWithJson(w, http.StatusOK, safeResponse)
 }
 
+func (cfg *apiConfig) refreshHandler(w http.ResponseWriter, r *http.Request) {
+
+	type validResponse struct {
+		AccessToken string `json:"token"`
+	}
+
+	// Check header for the refresh token
+	refreshToken, err := auth.GetBearerToken(r.Header)
+
+	// Handling error for missing Authorization token
+	if err != nil {
+		log.Println("No bearer token")
+		respondWithError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// Getting the token vals from the database
+	dbToken, err := cfg.databaseQueries.GetUserFromRefreshToken(r.Context(), refreshToken)
+
+	// Handling query error (call to database)
+	if err != nil {
+		log.Println("Error in getting refresh token in database")
+		respondWithError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// Handling value not found in database (null return)
+	var nullToken database.RefreshToken
+	if dbToken == nullToken {
+		log.Println("Refresh token not found in the database")
+		respondWithError(w, http.StatusNotFound, "Refresh token not in database")
+		return
+	}
+
+	// Creating new access token
+	newAccessToken, err := auth.MakeJWT(dbToken.UserID, cfg.jwtSecret, time.Duration(3600)*time.Second)
+
+	// Handling error for creation of access token
+	if err != nil {
+		log.Println("Error in creating new access/JWT token")
+		respondWithJson(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// Setting up response
+	resp := validResponse{
+		AccessToken: newAccessToken,
+	}
+
+	// Writing response
+	respondWithJson(w, http.StatusOK, resp)
+
+}
+
 func simpleCensor(input string, badWords map[string]struct{}) string {
 	// Cleaning up the body now...
 	words := strings.Fields(input)
@@ -472,6 +526,11 @@ func main() {
 	mux.HandleFunc(
 		"POST /api/login",
 		apiCfg.loginUserHandler,
+	)
+
+	mux.HandleFunc(
+		"POST /api/refresh",
+		apiCfg.refreshHandler,
 	)
 
 	// Server settings for our http server
