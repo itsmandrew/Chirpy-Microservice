@@ -251,30 +251,25 @@ func (cfg *apiConfig) getIndividualChirpHandler(w http.ResponseWriter, r *http.R
 func (cfg *apiConfig) loginUserHandler(w http.ResponseWriter, r *http.Request) {
 
 	type parameters struct {
-		Email            string `json:"email"`
-		Password         string `json:"password"`
-		ExpiresInSeconds int    `json:"expires_in_seconds"`
+		Email    string `json:"email"`
+		Password string `json:"password"`
 	}
 
 	type validResponse struct {
-		ID        uuid.UUID `json:"id"`
-		Email     string    `json:"email"`
-		CreatedAt time.Time `json:"created_at"`
-		UpdatedAt time.Time `json:"updated_at"`
-		Token     string    `json:"token"`
+		ID           uuid.UUID `json:"id"`
+		Email        string    `json:"email"`
+		CreatedAt    time.Time `json:"created_at"`
+		UpdatedAt    time.Time `json:"updated_at"`
+		Token        string    `json:"token"`
+		RefreshToken string    `json:"refresh_token"`
 	}
 
-	decoder := json.NewDecoder(r.Body)
 	params := parameters{}
+
+	// Decoding logic
+	decoder := json.NewDecoder(r.Body)
 	defer r.Body.Close()
-
 	err := decoder.Decode(&params)
-
-	if params.ExpiresInSeconds == 0 {
-		params.ExpiresInSeconds = 3600
-	}
-
-	log.Println(params)
 
 	if err != nil {
 		log.Printf("Error decoding")
@@ -282,35 +277,65 @@ func (cfg *apiConfig) loginUserHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	log.Println(params)
+
+	// Get user query (call to database)
 	user, err := cfg.databaseQueries.GetUserByEmail(r.Context(), params.Email)
+
+	// Error handling for if the datebase query goes wrong
 	if err != nil {
 		log.Println("Something went wrong with the query")
 		respondWithError(w, http.StatusInternalServerError, "Email does not exist")
 		return
 	}
 
+	// Checks if our response body password is equal to the encrypted password in our database
 	err = auth.CheckPasswordHash(user.HashedPassword, params.Password)
 
+	// Error handling for incorrect password
 	if err != nil {
 		log.Println(err.Error())
 		respondWithError(w, http.StatusUnauthorized, "Email or password is incorrect")
 		return
 	}
 
-	jwtToken, err := auth.MakeJWT(user.ID, cfg.jwtSecret, time.Duration(params.ExpiresInSeconds)*time.Second)
+	// Create a JWT token for our user that logins in (access token)
+	jwtToken, err := auth.MakeJWT(user.ID, cfg.jwtSecret, time.Duration(3600)*time.Second)
 
+	// Error handling if creation of token fucks up
 	if err != nil {
 		log.Println("Something went wrong with creating JWT token")
 		respondWithError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
+	// Create a refresh token (string form)
+	refreshToken, _ := auth.MakeRefreshToken()
+
+	refreshTokenParams := database.CreateRefreshTokenParams{
+		Token:  refreshToken,
+		UserID: user.ID,
+	}
+
+	// Insert refresh token into database
+	createdRToken, err := cfg.databaseQueries.CreateRefreshToken(r.Context(), refreshTokenParams)
+
+	// Error handling for insert refresh_token into database
+	if err != nil {
+		log.Println("Something went wrong with inserting refresh token into database")
+		respondWithError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	log.Printf("Refresh token created for %v\n", user.Email)
+
+	// Everything works
 	safeResponse := validResponse{
-		ID:        user.ID,
-		Email:     user.Email,
-		CreatedAt: user.CreatedAt,
-		UpdatedAt: user.UpdatedAt,
-		Token:     jwtToken,
+		ID:           user.ID,
+		CreatedAt:    user.CreatedAt,
+		UpdatedAt:    user.UpdatedAt,
+		Token:        jwtToken,
+		RefreshToken: createdRToken.Token,
 	}
 
 	respondWithJson(w, http.StatusOK, safeResponse)
