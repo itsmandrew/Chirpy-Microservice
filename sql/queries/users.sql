@@ -12,3 +12,17 @@ TRUNCATE TABLE users CASCADE;
 SELECT *
 FROM users
 WHERE email = $1;
+
+
+-- name: UpdateUserPassword :exec
+UPDATE users
+    SET hashed_password = $1,
+        email = $2,
+        updated_at = NOW()
+WHERE id = $3;
+
+
+-- name: GetUserByIDNoPassword :one
+SELECT id, created_at, updated_at, email
+FROM users
+WHERE id = $1;

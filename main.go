@@ -443,6 +443,85 @@ func (cfg *apiConfig) revokeUpdateHandler(w http.ResponseWriter, r *http.Request
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 }
 
+func (cfg *apiConfig) updateUserHandler(w http.ResponseWriter, r *http.Request) {
+
+	type paramaters struct {
+		Password string `json:"password"`
+		Email    string `json:"email"`
+	}
+
+	// 1.  Reads the Header for a Bearer Token
+	token, err := auth.GetBearerToken(r.Header)
+
+	if err != nil {
+		log.Println("No Bearer token")
+		respondWithError(w, http.StatusUnauthorized, err.Error())
+		return
+	}
+
+	// Checks to see if the token is a AccessToken vs RefreshToken (accessToken has 3 dots) -> Sanity Check
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		log.Printf("Token does not have three segments (likely not a JWT): %q\n", token)
+		respondWithError(w, http.StatusUnauthorized, "Invalid token format")
+		return
+	}
+
+	userID, err := auth.ValidateJWT(token, cfg.jwtSecret)
+
+	if err != nil {
+		log.Println("JWT not valid")
+		respondWithError(w, http.StatusUnauthorized, err.Error())
+		return
+	}
+
+	params := paramaters{}
+	// 2. Decode the body
+
+	decoder := json.NewDecoder(r.Body)
+	defer r.Body.Close()
+	err = decoder.Decode(&params)
+
+	if err != nil {
+		log.Printf("Error decoding")
+		respondWithError(w, http.StatusInternalServerError, "Something went wrong")
+		return
+	}
+
+	// 3. Hash the password
+	hashedPassword, err := auth.HashedPassword(params.Password)
+
+	if err != nil {
+		log.Println("Error in hashing password")
+		respondWithError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	newArguments := database.UpdateUserPasswordParams{
+		HashedPassword: hashedPassword,
+		Email:          params.Email,
+		ID:             userID,
+	}
+	err = cfg.databaseQueries.UpdateUserPassword(r.Context(), newArguments)
+
+	if err != nil {
+		log.Println("Error in UPDATE query execution")
+		respondWithError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// Return 200 and getUser
+	user, err := cfg.databaseQueries.GetUserByIDNoPassword(r.Context(), userID)
+	if err != nil {
+		log.Println("Error in GET user by email")
+		respondWithError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	respondWithJson(w, http.StatusOK, user)
+
+}
+
 func simpleCensor(input string, badWords map[string]struct{}) string {
 	// Cleaning up the body now...
 	words := strings.Fields(input)
@@ -584,6 +663,11 @@ func main() {
 	mux.HandleFunc(
 		"POST /api/revoke",
 		apiCfg.revokeUpdateHandler,
+	)
+
+	mux.HandleFunc(
+		"PUT /api/users",
+		apiCfg.updateUserHandler,
 	)
 
 	// Server settings for our http server

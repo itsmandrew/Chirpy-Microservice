@@ -71,3 +71,47 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 	)
 	return i, err
 }
+
+const getUserByIDNoPassword = `-- name: GetUserByIDNoPassword :one
+SELECT id, created_at, updated_at, email
+FROM users
+WHERE id = $1
+`
+
+type GetUserByIDNoPasswordRow struct {
+	ID        uuid.UUID `json:"id"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Email     string    `json:"email"`
+}
+
+func (q *Queries) GetUserByIDNoPassword(ctx context.Context, id uuid.UUID) (GetUserByIDNoPasswordRow, error) {
+	row := q.db.QueryRowContext(ctx, getUserByIDNoPassword, id)
+	var i GetUserByIDNoPasswordRow
+	err := row.Scan(
+		&i.ID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Email,
+	)
+	return i, err
+}
+
+const updateUserPassword = `-- name: UpdateUserPassword :exec
+UPDATE users
+    SET hashed_password = $1,
+        email = $2,
+        updated_at = NOW()
+WHERE id = $3
+`
+
+type UpdateUserPasswordParams struct {
+	HashedPassword string    `json:"hashed_password"`
+	Email          string    `json:"email"`
+	ID             uuid.UUID `json:"id"`
+}
+
+func (q *Queries) UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) error {
+	_, err := q.db.ExecContext(ctx, updateUserPassword, arg.HashedPassword, arg.Email, arg.ID)
+	return err
+}
