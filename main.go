@@ -250,15 +250,7 @@ func (cfg *apiConfig) getIndividualChirpHandler(w http.ResponseWriter, r *http.R
 
 	if err != nil {
 		log.Println("Something went wrong with the query")
-		respondWithError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	var nullVal database.Chirp
-
-	if chirp == nullVal {
-		log.Println("No chirps founds")
-		respondWithError(w, http.StatusNotFound, "No chirps found")
+		respondWithError(w, http.StatusNotFound, err.Error())
 		return
 	}
 
@@ -522,6 +514,81 @@ func (cfg *apiConfig) updateUserHandler(w http.ResponseWriter, r *http.Request) 
 
 }
 
+func (cfg *apiConfig) deleteChirpFromID(w http.ResponseWriter, r *http.Request) {
+
+	chirpID := r.PathValue("chirp_id")
+	log.Println(chirpID)
+
+	chirpID = strings.TrimSpace(chirpID) // just in case there’s whitespace
+	newChirpID, err := uuid.Parse(chirpID)
+
+	if err != nil {
+		log.Println("Error parsing chirp id into UUID:", err)
+		respondWithError(w, http.StatusBadRequest, "invalid chirp ID")
+		return
+	}
+
+	// 1.  Reads the Header for a Bearer Token
+	token, err := auth.GetBearerToken(r.Header)
+
+	if err != nil {
+		log.Println("No Bearer token")
+		respondWithError(w, http.StatusUnauthorized, err.Error())
+		return
+	}
+
+	// Checks to see if the token is a AccessToken vs RefreshToken (accessToken has 3 dots) -> Sanity Check
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		log.Printf("Token does not have three segments (likely not a JWT): %q\n", token)
+		respondWithError(w, http.StatusUnauthorized, "Invalid token format")
+		return
+	}
+
+	userID, err := auth.ValidateJWT(token, cfg.jwtSecret)
+
+	if err != nil {
+		log.Println("Error in validating JWT")
+		respondWithError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// DeleteTheChirp, check if our userID is the author of the chirp
+	chirp, err := cfg.databaseQueries.GetIndividualChirp(r.Context(), newChirpID)
+
+	if err != nil {
+		fmt.Println("Error in GETTING sql query / individual chirp")
+		respondWithError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	var nullChirp database.Chirp
+	if chirp == nullChirp {
+		fmt.Println("No chirp found by the provided ID")
+		respondWithError(w, http.StatusNotFound, "Lol no chirps existing with this ID")
+		return
+	}
+
+	if chirp.UserID != userID {
+		log.Println("User is not the author of this chirp dummy")
+		respondWithError(w, http.StatusForbidden, "User not the author of the chirp")
+		return
+	}
+
+	err = cfg.databaseQueries.DeleteChirpByID(r.Context(), newChirpID)
+
+	if err != nil {
+		log.Println("Error in executing DeleteChirpByID")
+		respondWithError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	// Return 204 if success
+
+}
+
 func simpleCensor(input string, badWords map[string]struct{}) string {
 	// Cleaning up the body now...
 	words := strings.Fields(input)
@@ -668,6 +735,11 @@ func main() {
 	mux.HandleFunc(
 		"PUT /api/users",
 		apiCfg.updateUserHandler,
+	)
+
+	mux.HandleFunc(
+		"DELETE /api/chirps/{chirp_id}",
+		apiCfg.deleteChirpFromID,
 	)
 
 	// Server settings for our http server
